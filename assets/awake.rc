@@ -1,0 +1,4 @@
+// ordinals must match src/icon.rs; the lowest icon id becomes the exe icon
+1 ICON "awake.ico"
+2 ICON "awake-display.ico"
+1 24 "awake.manifest"
