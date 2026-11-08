@@ -12,6 +12,7 @@ use clap::Parser;
 use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem};
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+use windows_sys::Win32::System::Threading::INFINITE;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
   DispatchMessageW, MSG, MsgWaitForMultipleObjects, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
   TranslateMessage, WM_QUIT,
@@ -21,7 +22,6 @@ use cli::{Cli, Command, Opts};
 use instance::Instance;
 use power::Mode;
 
-const TICK: Duration = Duration::from_secs(1);
 const PROCESS_POLL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(5);
@@ -115,12 +115,14 @@ fn serve(opts: &Opts) -> Result<()> {
   } else {
     Some(Tray::new(mode)?)
   };
+  trim_working_set();
 
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   let mut last_poll = Instant::now();
   loop {
     let wait = unsafe {
-      MsgWaitForMultipleObjects(1, &instance.stop, 0, TICK.as_millis() as u32, QS_ALLINPUT)
+      let timeout = next_wake(opts, deadline, last_poll, tray.is_some());
+      MsgWaitForMultipleObjects(1, &instance.stop, 0, timeout, QS_ALLINPUT)
     };
     if wait == WAIT_OBJECT_0 {
       break; // awake off
@@ -172,8 +174,11 @@ fn serve(opts: &Opts) -> Result<()> {
         break;
       }
     }
-    if let Some(tray) = &tray {
-      tray.refresh(&status_line(opts, deadline));
+    // Updating the tray pulls shell code back in; give it back afterwards.
+    if let Some(tray) = &tray
+      && tray.refresh(&status_line(opts, deadline))
+    {
+      trim_working_set();
     }
   }
 
@@ -181,6 +186,13 @@ fn serve(opts: &Opts) -> Result<()> {
   drop(tray);
   drop(instance);
   Ok(())
+}
+
+/// Hand startup-only pages (CLI parsing, DLL init, icon decoding) back to the
+/// OS. The idle loop touches little, so only that faults back in.
+fn trim_working_set() {
+  use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetProcessWorkingSetSize};
+  unsafe { SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX) };
 }
 
 impl From<&Opts> for Mode {
@@ -228,14 +240,16 @@ impl Tray {
     }
   }
 
-  /// Show `text` in the status menu item and tooltip, if it changed.
-  fn refresh(&self, text: &str) {
+  /// Show `text` in the status menu item and tooltip. Returns false if it
+  /// was already shown.
+  fn refresh(&self, text: &str) -> bool {
     if *self.shown.borrow() == text {
-      return;
+      return false;
     }
     self.status.set_text(text);
     let _ = self.icon.set_tooltip(Some(text));
     *self.shown.borrow_mut() = text.to_owned();
+    true
   }
 }
 
@@ -273,14 +287,47 @@ fn status_line(opts: &Opts, deadline: Option<Instant>) -> String {
   format!("Awake {}", parts.join(", "))
 }
 
-fn remaining(deadline: Instant) -> String {
-  let left = deadline.saturating_duration_since(Instant::now());
+/// Milliseconds until the loop has work to do: the countdown text changes,
+/// the deadline passes, or the watched process is due a check. Otherwise
+/// sleep until a message or `awake off` arrives.
+fn next_wake(opts: &Opts, deadline: Option<Instant>, last_poll: Instant, tray: bool) -> u32 {
+  let now = Instant::now();
+  let mut wake = None::<Duration>;
+  if let Some(d) = deadline {
+    let left = d.saturating_duration_since(now);
+    let until = if tray {
+      // Wait until the shown value drops to the next lower step.
+      let shown = shown_secs(left);
+      let step = if shown > 60 { 60 } else { 1 };
+      left.saturating_sub(Duration::from_secs(shown - step))
+    } else {
+      left
+    };
+    wake = Some(until);
+  }
+  if opts.r#while.is_some() {
+    let until = PROCESS_POLL.saturating_sub(now - last_poll);
+    wake = Some(wake.map_or(until, |w| w.min(until)));
+  }
+  match wake {
+    // At least 1ms so a timer that fires a hair early can't spin.
+    Some(w) => (w.as_millis() as u32).max(1),
+    None => INFINITE,
+  }
+}
+
+/// Seconds shown for the time left: whole seconds under a minute, rounded up
+/// to whole minutes past that, so the text stays short.
+fn shown_secs(left: Duration) -> u64 {
   let secs = left.as_millis().div_ceil(1000) as u64;
-  // Round up to whole minutes once past a minute, so the text stays short.
-  let secs = if secs >= 60 {
+  if secs >= 60 {
     secs.div_ceil(60) * 60
   } else {
     secs
-  };
-  humantime::format_duration(Duration::from_secs(secs)).to_string()
+  }
+}
+
+fn remaining(deadline: Instant) -> String {
+  let left = deadline.saturating_duration_since(Instant::now());
+  humantime::format_duration(Duration::from_secs(shown_secs(left))).to_string()
 }
