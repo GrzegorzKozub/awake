@@ -18,7 +18,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
   TranslateMessage, WM_QUIT,
 };
 
-use cli::{Cli, Command, Opts};
+use cli::{Cli, Command, LITERAL, Opts};
 use instance::Instance;
 use power::Mode;
 
@@ -32,10 +32,10 @@ const ERR: anstyle::Style = anstyle::AnsiColor::Red.on_default().bold();
 
 fn main() {
   let result = match Cli::parse().command {
-    Command::On(opts) => on(&opts),
-    Command::Off => off(),
-    Command::Status => status(),
-    Command::Serve(opts) => serve(&opts),
+    Some(Command::On(opts)) => on(&opts),
+    Some(Command::Off) => off(),
+    Some(Command::Status) | None => status(),
+    Some(Command::Serve(opts)) => serve(&opts),
   };
   if let Err(err) = result {
     eprintln!("{ERR}error:{ERR:#} {err:#}");
@@ -70,7 +70,7 @@ fn on(opts: &Opts) -> Result<()> {
 
   let verb = if replaced { "restarted" } else { "on" };
   println!("{OK}Awake {verb}{OK:#} {}", describe(opts));
-  println!("`awake off` to let the PC sleep again");
+  println!("Run {LITERAL}awake off{LITERAL:#} to let the PC sleep again");
   Ok(())
 }
 
@@ -110,18 +110,14 @@ fn serve(opts: &Opts) -> Result<()> {
   power::keep_awake(mode)?;
 
   let deadline = opts.r#for.map(|d| Instant::now() + *d);
-  let tray = if opts.no_tray {
-    None
-  } else {
-    Some(Tray::new(mode)?)
-  };
+  let tray = Tray::new(mode)?;
   trim_working_set();
 
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   let mut last_poll = Instant::now();
   loop {
     let wait = unsafe {
-      let timeout = next_wake(opts, deadline, last_poll, tray.is_some());
+      let timeout = next_wake(opts, deadline, last_poll);
       MsgWaitForMultipleObjects(1, &instance.stop, 0, timeout, QS_ALLINPUT)
     };
     if wait == WAIT_OBJECT_0 {
@@ -137,29 +133,27 @@ fn serve(opts: &Opts) -> Result<()> {
       }
     }
 
-    if let Some(tray) = &tray {
-      while let Ok(event) = MenuEvent::receiver().try_recv() {
-        if event.id == tray.quit.id() {
-          stop = true;
-        } else if event.id == tray.display.id() {
-          mode.display = tray.display.is_checked();
-          power::keep_awake(mode)?;
-          tray.update(mode);
-        }
+    while let Ok(event) = MenuEvent::receiver().try_recv() {
+      if event.id == tray.quit.id() {
+        stop = true;
+      } else if event.id == tray.display.id() {
+        mode.display = tray.display.is_checked();
+        power::keep_awake(mode)?;
+        tray.update(mode);
       }
-      // Left click toggles the display; the menu is on right click only.
-      while let Ok(event) = TrayIconEvent::receiver().try_recv() {
-        if let TrayIconEvent::Click {
-          button: MouseButton::Left,
-          button_state: MouseButtonState::Up,
-          ..
-        } = event
-        {
-          mode.display = !mode.display;
-          tray.display.set_checked(mode.display);
-          power::keep_awake(mode)?;
-          tray.update(mode);
-        }
+    }
+    // Left click toggles the display; the menu is on right click only.
+    while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+      if let TrayIconEvent::Click {
+        button: MouseButton::Left,
+        button_state: MouseButtonState::Up,
+        ..
+      } = event
+      {
+        mode.display = !mode.display;
+        tray.display.set_checked(mode.display);
+        power::keep_awake(mode)?;
+        tray.update(mode);
       }
     }
 
@@ -175,9 +169,7 @@ fn serve(opts: &Opts) -> Result<()> {
       }
     }
     // Updating the tray pulls shell code back in; give it back afterwards.
-    if let Some(tray) = &tray
-      && tray.refresh(&status_line(opts, deadline))
-    {
+    if tray.refresh(&status_line(opts, deadline)) {
       trim_working_set();
     }
   }
@@ -290,20 +282,15 @@ fn status_line(opts: &Opts, deadline: Option<Instant>) -> String {
 /// Milliseconds until the loop has work to do: the countdown text changes,
 /// the deadline passes, or the watched process is due a check. Otherwise
 /// sleep until a message or `awake off` arrives.
-fn next_wake(opts: &Opts, deadline: Option<Instant>, last_poll: Instant, tray: bool) -> u32 {
+fn next_wake(opts: &Opts, deadline: Option<Instant>, last_poll: Instant) -> u32 {
   let now = Instant::now();
   let mut wake = None::<Duration>;
   if let Some(d) = deadline {
     let left = d.saturating_duration_since(now);
-    let until = if tray {
-      // Wait until the shown value drops to the next lower step.
-      let shown = shown_secs(left);
-      let step = if shown > 60 { 60 } else { 1 };
-      left.saturating_sub(Duration::from_secs(shown - step))
-    } else {
-      left
-    };
-    wake = Some(until);
+    // Wait until the shown value drops to the next lower step.
+    let shown = shown_secs(left);
+    let step = if shown > 60 { 60 } else { 1 };
+    wake = Some(left.saturating_sub(Duration::from_secs(shown - step)));
   }
   if opts.r#while.is_some() {
     let until = PROCESS_POLL.saturating_sub(now - last_poll);
