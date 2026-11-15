@@ -1,0 +1,48 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      # Link the C runtime statically so the exe needs no VC++ redistributable.
+      RUSTFLAGS: -C target-feature=+crt-static
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+          components: clippy, rustfmt
+
+      - name: Check tag matches Cargo.toml
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match Cargo.toml version $version"
+          }
+
+      - run: cargo fmt --check
+      - run: cargo clippy --release --locked --target $env:TARGET -- -D warnings
+      - run: cargo build --release --locked --target $env:TARGET
+
+      - name: Package
+        run: |
+          $zip = "awake-$env:GITHUB_REF_NAME-$env:TARGET.zip"
+          Compress-Archive "target/$env:TARGET/release/awake.exe" $zip
+          "ZIP=$zip" >> $env:GITHUB_ENV
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME $env:ZIP --verify-tag --generate-notes

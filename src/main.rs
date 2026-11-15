@@ -26,8 +26,9 @@ const PROCESS_POLL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 
-const OK: anstyle::Style = anstyle::AnsiColor::Green.on_default().bold();
-const OFF: anstyle::Style = anstyle::AnsiColor::Yellow.on_default().bold();
+// Staying awake is the unusual state, so it gets the warning color.
+const ON: anstyle::Style = anstyle::AnsiColor::Yellow.on_default().bold();
+const OFF: anstyle::Style = anstyle::AnsiColor::Green.on_default().bold();
 const ERR: anstyle::Style = anstyle::AnsiColor::Red.on_default().bold();
 
 fn main() {
@@ -69,23 +70,25 @@ fn on(opts: &Opts) -> Result<()> {
   }
 
   let verb = if replaced { "restarted" } else { "on" };
-  println!("{OK}Awake {verb}{OK:#} {}", describe(opts));
-  println!("Run {LITERAL}awake off{LITERAL:#} to let the PC sleep again");
+  println!(
+    "{ON}Awake {verb}{ON:#}{}. Run {LITERAL}awake off{LITERAL:#} to let the PC sleep again.",
+    describe(opts)
+  );
   Ok(())
 }
 
 fn off() -> Result<()> {
   if instance::stop(STOP_TIMEOUT)? {
-    println!("{OFF}Sleep allowed{OFF:#} (awake stopped)");
+    println!("{OFF}Awake off{OFF:#}. The PC can sleep again.");
   } else {
-    println!("awake was not on");
+    println!("Awake was not on.");
   }
   Ok(())
 }
 
 fn status() -> Result<()> {
   if instance::is_running() {
-    println!("{OK}on{OK:#}");
+    println!("{ON}on{ON:#}");
   } else {
     println!("{OFF}off{OFF:#}");
   }
@@ -245,23 +248,19 @@ impl Tray {
   }
 }
 
-/// e.g. "system + display, for 1h 30m, while tidal runs"
+/// What follows "Awake on", e.g. ", display kept on, for 1h 30m, while tidal runs".
 fn describe(opts: &Opts) -> String {
-  let mut parts = vec![
-    if opts.display {
-      "system + display"
-    } else {
-      "system"
-    }
-    .to_owned(),
-  ];
+  let mut out = String::new();
+  if opts.display {
+    out.push_str(", display kept on");
+  }
   if let Some(d) = &opts.r#for {
-    parts.push(format!("for {d}"));
+    out.push_str(&format!(", for {d}"));
   }
   if let Some(p) = &opts.r#while {
-    parts.push(format!("while {p} runs"));
+    out.push_str(&format!(", while {p} runs"));
   }
-  parts.join(", ")
+  out
 }
 
 /// Tray status line, e.g. "Awake for 1h 20m, while tidal runs".

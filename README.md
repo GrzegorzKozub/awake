@@ -21,13 +21,37 @@ the instance with the new options.
 
 Tray icon: left click toggles keeping the display on, right click opens the menu.
 
+## Install
+
+Download `awake.exe` from the
+[latest release](https://github.com/GrzegorzKozub/awake/releases/latest) and
+put it on your `PATH`.
+
 ## Build
 
 ```
 cargo build --release
 ```
 
-Requires `windres` (MSYS2 / MinGW) to embed the icons and the DPI-aware
-manifest. `assets/icons.ps1` regenerates the icons from the
+Embedding the icons and the DPI-aware manifest needs a resource compiler:
+`windres` (MSYS2 / MinGW) for the GNU toolchain, or `rc.exe` (Windows SDK) for
+MSVC. `assets/icons.ps1` regenerates the icons from the
 [Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) panel
 icons.
+
+## Release
+
+Versions are dates: `YYYY.M.D`, at most one release per day.
+
+```
+./release.ps1
+```
+
+sets today's version in `Cargo.toml`, commits, and pushes a `v` tag. The tag
+runs the release workflow, which checks formatting and lints, builds a
+statically linked MSVC exe, and publishes
+`awake-vYYYY.M.D-x86_64-pc-windows-msvc.zip`.
+
+## License
+
+[GPL-3.0](LICENSE), as are the bundled Papirus icons.
