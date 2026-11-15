@@ -24,13 +24,13 @@ const STYLES: Styles = Styles::styled()
 /// Without a command, shows whether awake is on.
 #[derive(Parser, Debug)]
 #[command(
-  name = "awake",
-  bin_name = "awake",
-  version,
-  about,
-  long_about,
-  styles = STYLES,
-  after_help = examples(),
+    name = "awake",
+    bin_name = "awake",
+    version,
+    about,
+    long_about,
+    styles = STYLES,
+    after_help = examples(),
 )]
 pub struct Cli {
     #[command(subcommand)]
