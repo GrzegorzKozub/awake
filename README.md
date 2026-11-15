@@ -13,7 +13,7 @@ awake on -t 2h           stay awake for two hours
 awake on -w tidal        stay awake while TIDAL.exe is running
 awake on -d              keep the display on too
 awake off                let the PC sleep again
-awake status             on / off (also plain `awake`)
+awake status             Awake on / Awake off (also plain `awake`)
 ```
 
 `awake on` starts a background instance and returns; running it again replaces

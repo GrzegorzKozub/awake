@@ -81,16 +81,16 @@ fn off() -> Result<()> {
   if instance::stop(STOP_TIMEOUT)? {
     println!("{OFF}Awake off{OFF:#}. The PC can sleep again.");
   } else {
-    println!("Awake was not on.");
+    println!("{OFF}Awake off{OFF:#}");
   }
   Ok(())
 }
 
 fn status() -> Result<()> {
   if instance::is_running() {
-    println!("{ON}on{ON:#}");
+    println!("{ON}Awake on{ON:#}");
   } else {
-    println!("{OFF}off{OFF:#}");
+    println!("{OFF}Awake off{OFF:#}");
   }
   Ok(())
 }
