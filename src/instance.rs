@@ -36,7 +36,7 @@ impl Instance {
         }
         if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
             unsafe { CloseHandle(mutex) };
-            bail!("awake is already on (run 'awake off' first)");
+            bail!("awake is already on");
         }
         let stop = unsafe { CreateEventW(std::ptr::null(), 1, 0, wide(EVENT).as_ptr()) };
         if stop.is_null() {

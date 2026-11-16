@@ -18,7 +18,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     TranslateMessage, WM_QUIT,
 };
 
-use cli::{Cli, Command, LITERAL, Opts};
+use cli::{Cli, Command, Opts};
 use instance::Instance;
 use power::Mode;
 
@@ -26,10 +26,11 @@ const PROCESS_POLL: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 
-// Staying awake is the unusual state, so it gets the warning color.
-const ON: anstyle::Style = anstyle::AnsiColor::Yellow.on_default().bold();
-const OFF: anstyle::Style = anstyle::AnsiColor::Green.on_default().bold();
-const ERR: anstyle::Style = anstyle::AnsiColor::Red.on_default().bold();
+// Yellow matches the tray icon with the display kept on.
+const DISPLAY: anstyle::Style = anstyle::AnsiColor::Yellow.on_default();
+const VALUE: anstyle::Style = anstyle::AnsiColor::Magenta.on_default();
+const OFF: anstyle::Style = anstyle::AnsiColor::White.on_default();
+const ERR: anstyle::Style = anstyle::AnsiColor::Red.on_default();
 
 fn main() {
     let result = match Cli::parse().command {
@@ -51,7 +52,7 @@ fn on(opts: &Opts) -> Result<()> {
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 
     check_process(opts)?;
-    let replaced = instance::stop(STOP_TIMEOUT)?;
+    instance::stop(STOP_TIMEOUT)?;
 
     let exe = std::env::current_exe().context("cannot locate own executable")?;
     let mut child = std::process::Command::new(exe)
@@ -69,28 +70,21 @@ fn on(opts: &Opts) -> Result<()> {
         }
     }
 
-    let verb = if replaced { "restarted" } else { "on" };
-    println!(
-        "{ON}Awake {verb}{ON:#}{}. Run {LITERAL}awake off{LITERAL:#} to let the PC sleep again.",
-        describe(opts)
-    );
+    println!("awake on{}", describe(opts));
     Ok(())
 }
 
 fn off() -> Result<()> {
-    if instance::stop(STOP_TIMEOUT)? {
-        println!("{OFF}Awake off{OFF:#}. The PC can sleep again.");
-    } else {
-        println!("{OFF}Awake off{OFF:#}");
-    }
+    instance::stop(STOP_TIMEOUT)?;
+    println!("{OFF}awake off{OFF:#}");
     Ok(())
 }
 
 fn status() -> Result<()> {
     if instance::is_running() {
-        println!("{ON}Awake on{ON:#}");
+        println!("awake on");
     } else {
-        println!("{OFF}Awake off{OFF:#}");
+        println!("{OFF}awake off{OFF:#}");
     }
     Ok(())
 }
@@ -99,7 +93,7 @@ fn check_process(opts: &Opts) -> Result<()> {
     if let Some(name) = &opts.r#while
         && !process::is_running(name)?
     {
-        bail!("no process named '{name}' is running");
+        bail!("no process named {VALUE}{name}{VALUE:#} is running");
     }
     Ok(())
 }
@@ -248,17 +242,17 @@ impl Tray {
     }
 }
 
-/// What follows "Awake on", e.g. ", display kept on, for 1h 30m, while tidal runs".
+/// What follows "awake on", e.g. ", display kept on, for 1h 30m, while tidal runs".
 fn describe(opts: &Opts) -> String {
     let mut out = String::new();
     if opts.display {
-        out.push_str(", display kept on");
+        out.push_str(&format!(", {DISPLAY}display kept on{DISPLAY:#}"));
     }
     if let Some(d) = &opts.r#for {
-        out.push_str(&format!(", for {d}"));
+        out.push_str(&format!(", for {VALUE}{d}{VALUE:#}"));
     }
     if let Some(p) = &opts.r#while {
-        out.push_str(&format!(", while {p} runs"));
+        out.push_str(&format!(", while {VALUE}{p}{VALUE:#} runs"));
     }
     out
 }
