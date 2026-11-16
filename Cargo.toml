@@ -1,6 +1,6 @@
 [package]
 name = "awake"
-version = "2026.11.15"
+version = "2026.11.16"
 edition = "2024"
 license = "GPL-3.0-only"
 repository = "https://github.com/GrzegorzKozub/awake"
